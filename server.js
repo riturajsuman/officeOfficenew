@@ -11,25 +11,21 @@ const app = express();
 app.use(express.json());
 
 // =============================================
-// Swagger Documentation Setup
+// Swagger Setup
 // =============================================
 
 const swaggerOptions = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'Authentication API',
+      title: 'User Authentication API',
       version: '1.0.0',
-      description: 'API for user registration, login, and protected routes',
-      contact: {
-        name: 'API Support',
-        email: 'support@example.com'
-      }
+      description: 'API for user registration and login with extended fields'
     },
     servers: [
       {
         url: `http://localhost:${process.env.PORT || 3000}`,
-        description: 'Development server'
+        description: 'Dev server'
       }
     ],
     components: {
@@ -41,102 +37,105 @@ const swaggerOptions = {
         }
       },
       schemas: {
-        User: {
+        SignupRequest: {
           type: 'object',
-          required: ['username', 'password'],
+          required: ['email', 'password', 'confirmPassword', 'dateOfBirth', 'gender'],
           properties: {
-            username: {
-              type: 'string',
-              example: 'john_doe'
-            },
-            password: {
-              type: 'string',
-              example: 'securePassword123'
-            }
+            email: { type: 'string', example: 'user@example.com' },
+            password: { type: 'string', example: 'Password123' },
+            confirmPassword: { type: 'string', example: 'Password123' },
+            dateOfBirth: { type: 'string', format: 'date', example: '1995-04-15' },
+            company: { type: 'string', example: 'Acme Inc.' },
+            gender: { type: 'string', enum: ['Male', 'Female', 'Other'], example: 'Male' }
           }
         },
-        Token: {
+        LoginRequest: {
+          type: 'object',
+          required: ['email', 'password'],
+          properties: {
+            email: { type: 'string', example: 'user@example.com' },
+            password: { type: 'string', example: 'Password123' }
+          }
+        },
+        AuthResponse: {
           type: 'object',
           properties: {
-            token: {
-              type: 'string',
-              example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
-            },
-            username: {
-              type: 'string',
-              example: 'john_doe'
-            }
+            token: { type: 'string' },
+            email: { type: 'string' },
+            message: { type: 'string' }
           }
         },
         Error: {
           type: 'object',
           properties: {
-            error: {
-              type: 'string',
-              example: 'Error message'
-            }
+            error: { type: 'string' }
           }
         }
       }
     },
-    security: [{
-      bearerAuth: []
-    }]
+    security: [{ bearerAuth: [] }]
   },
-  apis: ['./server.js'] // Path to the API docs
+  apis: ['./server.js']
 };
 
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // =============================================
-// Database Connection
+// Mongoose Connection
 // =============================================
 
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-  ssl: true,
-  retryWrites: true
+  ssl: true
 })
 .then(() => console.log('🔌 Connected to MongoDB Atlas'))
 .catch(err => console.error('❌ MongoDB connection error:', err));
 
 // =============================================
-// User Model
+// User Schema
 // =============================================
 
 const userSchema = new mongoose.Schema({
-  username: { 
-    type: String, 
-    required: true, 
+  email: {
+    type: String,
+    required: true,
     unique: true,
+    lowercase: true,
     trim: true,
-    minlength: 3,
-    maxlength: 30
+    match: /^\S+@\S+\.\S+$/
   },
-  password: { 
-    type: String, 
+  password: {
+    type: String,
     required: true,
     minlength: 6
+  },
+  dateOfBirth: {
+    type: Date,
+    required: true
+  },
+  company: {
+    type: String,
+    default: ''
+  },
+  gender: {
+    type: String,
+    enum: ['Male', 'Female', 'Other'],
+    required: true
   }
 });
 
 const User = mongoose.model('User', userSchema);
 
 // =============================================
-// Middleware
+// JWT Middleware
 // =============================================
 
-/**
- * Authenticate JWT token
- */
 const authenticate = (req, res, next) => {
   const token = req.header('Authorization')?.replace('Bearer ', '');
-  
-  if (!token) {
-    return res.status(401).json({ error: 'Access denied. No token provided.' });
-  }
+
+  if (!token) return res.status(401).json({ error: 'Access denied. No token provided.' });
 
   try {
     const verified = jwt.verify(token, process.env.JWT_SECRET);
@@ -162,59 +161,50 @@ const authenticate = (req, res, next) => {
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/User'
+ *             $ref: '#/components/schemas/SignupRequest'
  *     responses:
  *       201:
- *         description: User created successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   example: User created successfully
+ *         description: User registered successfully
  *       400:
- *         description: Bad request (validation error or username exists)
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
+ *         description: Validation error
  *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
+ *         description: Server error
  */
 app.post('/signup', async (req, res) => {
   try {
-    const { username, password } = req.body;
-    
-    // Input validation
-    if (!username || !password) {
-      return res.status(400).json({ error: 'Username and password are required' });
+    const { email, password, confirmPassword, dateOfBirth, company, gender } = req.body;
+
+    if (!email || !password || !confirmPassword || !dateOfBirth || !gender) {
+      return res.status(400).json({ error: 'All required fields must be filled.' });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({ error: 'Passwords do not match.' });
     }
 
     if (password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
     }
 
-    // Check if user exists
-    const existingUser = await User.findOne({ username });
-    if (existingUser) {
-      return res.status(400).json({ error: 'Username already exists' });
-    }
+    const existingUser = await User.findOne({ email });
+    if (existingUser) return res.status(400).json({ error: 'Email already registered.' });
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
-    const user = new User({ username, password: hashedPassword });
+
+    const user = new User({
+      email,
+      password: hashedPassword,
+      dateOfBirth,
+      company,
+      gender
+    });
+
     await user.save();
 
-    res.status(201).json({ message: 'User created successfully' });
+    res.status(201).json({ message: 'User registered successfully.' });
   } catch (error) {
     console.error('Signup error:', error);
-    res.status(500).json({ error: 'Server error during registration' });
+    res.status(500).json({ error: 'Server error during signup.' });
   }
 });
 
@@ -222,70 +212,48 @@ app.post('/signup', async (req, res) => {
  * @swagger
  * /login:
  *   post:
- *     summary: Authenticate user and get JWT token
+ *     summary: Login and get JWT token
  *     tags: [Authentication]
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/User'
+ *             $ref: '#/components/schemas/LoginRequest'
  *     responses:
  *       200:
- *         description: Successful authentication
+ *         description: Successful login
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/Token'
+ *               $ref: '#/components/schemas/AuthResponse'
  *       401:
- *         description: Invalid credentials
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
+ *         description: Unauthorized
  *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
+ *         description: Server error
  */
 app.post('/login', async (req, res) => {
   try {
-    const { username, password } = req.body;
-    
-    // Input validation
-    if (!username || !password) {
-      return res.status(400).json({ error: 'Username and password are required' });
-    }
+    const { email, password } = req.body;
 
-    // Find user
-    const user = await User.findOne({ username });
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required.' });
 
-    // Check password
+    const user = await User.findOne({ email });
+    if (!user) return res.status(401).json({ error: 'Invalid credentials.' });
+
     const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+    if (!validPassword) return res.status(401).json({ error: 'Invalid credentials.' });
 
-    // Generate JWT token
     const token = jwt.sign(
-      { _id: user._id, username: user.username },
+      { _id: user._id, email: user.email },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
 
-    res.json({ 
-      token,
-      username: user.username,
-      message: 'Login successful'
-    });
+    res.json({ token, email: user.email, message: 'Login successful' });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Server error during login' });
+    res.status(500).json({ error: 'Server error during login.' });
   }
 });
 
@@ -293,57 +261,35 @@ app.post('/login', async (req, res) => {
  * @swagger
  * /profile:
  *   get:
- *     summary: Get current user profile (protected route)
+ *     summary: Get user profile (protected)
  *     tags: [User]
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: User profile data
+ *         description: User profile
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 message:
+ *                 email:
  *                   type: string
- *                   example: Protected data
- *                 user:
- *                   type: object
- *                   properties:
- *                     _id:
- *                       type: string
- *                       example: 507f1f77bcf86cd799439011
- *                     username:
- *                       type: string
- *                       example: john_doe
+ *                 _id:
+ *                   type: string
  *       401:
- *         description: Unauthorized - Missing or invalid token
- *       403:
- *         description: Forbidden - Token expired
+ *         description: Unauthorized
  */
 app.get('/profile', authenticate, (req, res) => {
-  res.json({ 
-    message: 'Protected data', 
-    user: req.user 
-  });
+  res.json({ _id: req.user._id, email: req.user.email });
 });
 
 // =============================================
-// Server Startup
+// Server Start
 // =============================================
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📚 API docs available at http://localhost:${PORT}/api-docs`);
-});
-
-// =============================================
-// Error Handling Middleware (should be last)
-// =============================================
-
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something broke!' });
+  console.log(`🚀 Server running at http://localhost:${PORT}`);
+  console.log(`📚 Swagger docs at http://localhost:${PORT}/api-docs`);
 });
