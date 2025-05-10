@@ -1,0 +1,8 @@
+applications:
+  - name: auth-api
+    memory: 256M
+    disk_quota: 256M
+    instances: 1
+    buildpack: nodejs_buildpack
+    env:
+      MONGODB_URI: "mongodb+srv://riturajsuman8833:8aKPkypRX9qVhZl0@riturajtest.kmlvgjh.mongodb.net/authdb?retryWrites=true&w=majority"
