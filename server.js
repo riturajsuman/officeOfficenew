@@ -6,6 +6,7 @@ const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('swagger-ui-express');
 
 const app = express();
+const Interest = require('./models/Interest.js');
 app.use(express.json());
 
 // =============================================
@@ -93,7 +94,7 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  *                 type: string
  *               password:
  *                 type: string
- *               confirmPassword:
+ *               Name:
  *                 type: string
  *               dateOfBirth:
  *                 type: string
@@ -110,19 +111,16 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  */
 app.post('/signup', async (req, res) => {
   try {
-    const { email, password, confirmPassword, dateOfBirth, company, gender } = req.body;
+    const { name,email, password, dateOfBirth, company, gender } = req.body;
 
-    if (!email || !password || !confirmPassword || !dateOfBirth || !gender)
+    if (!name || !email || !password || !dateOfBirth || !gender)
       return res.status(400).json({ error: 'All required fields must be filled.' });
-
-    if (password !== confirmPassword)
-      return res.status(400).json({ error: 'Passwords do not match.' });
 
     if (await User.findOne({ email }))
       return res.status(400).json({ error: 'Email already registered.' });
 
-    const hashedPassword = await bcrypt.hash(password, 12);
-    const user = new User({ email, password: hashedPassword, dateOfBirth, company, gender });
+
+    const user = new User({name,email, password, dateOfBirth, company, gender });
     await user.save();
 
     res.status(201).json({ message: 'User registered successfully.' });
@@ -305,6 +303,87 @@ app.get('/profile', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch profile' });
   }
 });
+
+
+/**
+ * @swagger
+ * /interest:
+ *   post:
+ *     summary: Create or update user interests and availability
+ *     tags: [Interest]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - interests
+ *               - availability
+ *             properties:
+ *               email:
+ *                 type: string
+ *               interests:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               availability:
+ *                 type: object
+ *                 properties:
+ *                   Monday:
+ *                     type: array
+ *                     items:
+ *                       type: string
+ *                   Tuesday:
+ *                     type: array
+ *                     items:
+ *                       type: string
+ *                   Wednesday:
+ *                     type: array
+ *                     items:
+ *                       type: string
+ *                   Thursday:
+ *                     type: array
+ *                     items:
+ *                       type: string
+ *                   Friday:
+ *                     type: array
+ *                     items:
+ *                       type: string
+ *     responses:
+ *       200:
+ *         description: Interests and availability saved successfully
+ *       400:
+ *         description: Missing required fields or invalid availability
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Server error
+ */
+app.post('/interest', async (req, res) => {
+  try {
+    const { email, interests, availability } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // Save to Interest collection
+    await Interest.findOneAndUpdate(
+      { email }, // Use email as the unique identifier
+      { $set: { interests, availability, email } },
+      { upsert: true, new: true }
+    );
+
+    res.status(200).json({ message: 'Interests and availability saved to both collections' });
+  } catch (err) {
+    console.error('Interest save error:', err);
+    res.status(500).json({ error: 'Failed to save interests' });
+  }
+});
+
+
 
 
 /**
