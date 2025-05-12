@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+//const jwt = require('jsonwebtoken');
 const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('swagger-ui-express');
 
@@ -60,7 +60,6 @@ const swaggerOptions = {
         AuthResponse: {
           type: 'object',
           properties: {
-            token: { type: 'string' },
             email: { type: 'string' },
             message: { type: 'string' }
           }
@@ -132,7 +131,7 @@ const User = mongoose.model('User', userSchema);
 // JWT Middleware
 // =============================================
 
-const authenticate = (req, res, next) => {
+/*const authenticate = (req, res, next) => {
   const token = req.header('Authorization')?.replace('Bearer ', '');
 
   if (!token) return res.status(401).json({ error: 'Access denied. No token provided.' });
@@ -144,7 +143,7 @@ const authenticate = (req, res, next) => {
   } catch (err) {
     res.status(400).json({ error: 'Invalid token' });
   }
-};
+};*/
 
 // =============================================
 // Routes
@@ -189,11 +188,11 @@ app.post('/signup', async (req, res) => {
     const existingUser = await User.findOne({ email });
     if (existingUser) return res.status(400).json({ error: 'Email already registered.' });
 
-    const hashedPassword = await bcrypt.hash(password, 12);
+    //const hashedPassword = await bcrypt.hash(password, 12);
 
     const user = new User({
       email,
-      password: hashedPassword,
+      password,
       dateOfBirth,
       company,
       gender
@@ -236,26 +235,24 @@ app.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required.' });
+    if (!email || !password)
+      return res.status(400).json({ error: 'Email and password required.' });
 
     const user = await User.findOne({ email });
-    if (!user) return res.status(401).json({ error: 'Invalid credentials.' });
+    if (!user)
+      return res.status(401).json({ error: 'Invalid credentials.' });
 
-    const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) return res.status(401).json({ error: 'Invalid credentials.' });
+    // For development: compare plain text passwords directly
+    if (user.password !== password)
+      return res.status(401).json({ error: 'Invalid credentials.' });
 
-    const token = jwt.sign(
-      { _id: user._id, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: '1h' }
-    );
-
-    res.json({ token, email: user.email, message: 'Login successful' });
+    res.json({ email: user.email, message: 'Login successful' });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Server error during login.' });
   }
 });
+
 
 /**
  * @swagger
@@ -280,7 +277,7 @@ app.post('/login', async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-app.get('/profile', authenticate, (req, res) => {
+app.get('/profile', (req, res) => {
   res.json({ _id: req.user._id, email: req.user.email });
 });
 
