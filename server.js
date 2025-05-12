@@ -2,88 +2,15 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
-//const jwt = require('jsonwebtoken');
 const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('swagger-ui-express');
 
-// Initialize Express app
 const app = express();
 app.use(express.json());
 
 // =============================================
-// Swagger Setup
+// MongoDB Connection
 // =============================================
-
-const swaggerOptions = {
-  definition: {
-    openapi: '3.0.0',
-    info: {
-      title: 'User Authentication API',
-      version: '1.0.0',
-      description: 'API for user registration and login with extended fields'
-    },
-    servers: [
-      {
-        url: `http://localhost:${process.env.PORT || 3000}`,
-        description: 'Dev server'
-      }
-    ],
-    components: {
-      securitySchemes: {
-        bearerAuth: {
-          type: 'http',
-          scheme: 'bearer',
-          bearerFormat: 'JWT'
-        }
-      },
-      schemas: {
-        SignupRequest: {
-          type: 'object',
-          required: ['email', 'password', 'confirmPassword', 'dateOfBirth', 'gender'],
-          properties: {
-            email: { type: 'string', example: 'user@example.com' },
-            password: { type: 'string', example: 'Password123' },
-            confirmPassword: { type: 'string', example: 'Password123' },
-            dateOfBirth: { type: 'string', format: 'date', example: '1995-04-15' },
-            company: { type: 'string', example: 'Acme Inc.' },
-            gender: { type: 'string', enum: ['Male', 'Female', 'Other'], example: 'Male' }
-          }
-        },
-        LoginRequest: {
-          type: 'object',
-          required: ['email', 'password'],
-          properties: {
-            email: { type: 'string', example: 'user@example.com' },
-            password: { type: 'string', example: 'Password123' }
-          }
-        },
-        AuthResponse: {
-          type: 'object',
-          properties: {
-            email: { type: 'string' },
-            message: { type: 'string' }
-          }
-        },
-        Error: {
-          type: 'object',
-          properties: {
-            error: { type: 'string' }
-          }
-        }
-      }
-    },
-    security: [{ bearerAuth: [] }]
-  },
-  apis: ['./server.js']
-};
-
-const swaggerSpec = swaggerJsdoc(swaggerOptions);
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
-// =============================================
-// Mongoose Connection
-// =============================================
-
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -93,57 +20,51 @@ mongoose.connect(process.env.MONGODB_URI, {
 .catch(err => console.error('❌ MongoDB connection error:', err));
 
 // =============================================
-// User Schema
+// Schemas & Models
 // =============================================
-
 const userSchema = new mongoose.Schema({
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-    lowercase: true,
-    trim: true,
-    match: /^\S+@\S+\.\S+$/
-  },
-  password: {
-    type: String,
-    required: true,
-    minlength: 6
-  },
-  dateOfBirth: {
-    type: Date,
-    required: true
-  },
-  company: {
-    type: String,
-    default: ''
-  },
-  gender: {
-    type: String,
-    enum: ['Male', 'Female', 'Other'],
-    required: true
-  }
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  dateOfBirth: { type: Date, required: true },
+  company: { type: String, default: '' },
+  gender: { type: String, enum: ['Male', 'Female', 'Other'], required: true }
 });
-
 const User = mongoose.model('User', userSchema);
 
-// =============================================
-// JWT Middleware
-// =============================================
-
-/*const authenticate = (req, res, next) => {
-  const token = req.header('Authorization')?.replace('Bearer ', '');
-
-  if (!token) return res.status(401).json({ error: 'Access denied. No token provided.' });
-
-  try {
-    const verified = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = verified;
-    next();
-  } catch (err) {
-    res.status(400).json({ error: 'Invalid token' });
+const userProfileSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
+  interests: [String],
+  availability: {
+    type: Map,
+    of: [String]
+  },
+  commutePreferences: {
+    direction: { type: String, enum: ['To Office', 'To Home'] },
+    days: [String],
+    departureTime: String,
+    commuteMode: { type: String, enum: ['Drive', 'Carpool', 'Transit', 'Bike', 'Walk'] },
+    flexibleTiming: { type: Boolean, default: false }
   }
-};*/
+});
+const UserProfile = mongoose.model('UserProfile', userProfileSchema);
+
+// =============================================
+// Swagger Setup
+// =============================================
+const swaggerOptions = {
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'User API',
+      version: '1.0.0',
+      description: 'APIs for signup, login, and user profile'
+    },
+    servers: [{ url: `http://localhost:${process.env.PORT || 3000}` }]
+  },
+  apis: ['./server.js']
+};
+const swaggerSpec = swaggerJsdoc(swaggerOptions);
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // =============================================
 // Routes
@@ -154,55 +75,59 @@ const User = mongoose.model('User', userSchema);
  * /signup:
  *   post:
  *     summary: Register a new user
- *     tags: [Authentication]
+ *     tags: [Auth]
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/SignupRequest'
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *               - confirmPassword
+ *               - dateOfBirth
+ *               - gender
+ *             properties:
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               confirmPassword:
+ *                 type: string
+ *               dateOfBirth:
+ *                 type: string
+ *                 format: date
+ *               company:
+ *                 type: string
+ *               gender:
+ *                 type: string
  *     responses:
  *       201:
  *         description: User registered successfully
  *       400:
- *         description: Validation error
- *       500:
- *         description: Server error
+ *         description: Invalid input
  */
 app.post('/signup', async (req, res) => {
   try {
     const { email, password, confirmPassword, dateOfBirth, company, gender } = req.body;
 
-    if (!email || !password || !confirmPassword || !dateOfBirth || !gender) {
+    if (!email || !password || !confirmPassword || !dateOfBirth || !gender)
       return res.status(400).json({ error: 'All required fields must be filled.' });
-    }
 
-    if (password !== confirmPassword) {
+    if (password !== confirmPassword)
       return res.status(400).json({ error: 'Passwords do not match.' });
-    }
 
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
-    }
+    if (await User.findOne({ email }))
+      return res.status(400).json({ error: 'Email already registered.' });
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser) return res.status(400).json({ error: 'Email already registered.' });
-
-    //const hashedPassword = await bcrypt.hash(password, 12);
-
-    const user = new User({
-      email,
-      password,
-      dateOfBirth,
-      company,
-      gender
-    });
-
+    const hashedPassword = await bcrypt.hash(password, 12);
+    const user = new User({ email, password: hashedPassword, dateOfBirth, company, gender });
     await user.save();
 
     res.status(201).json({ message: 'User registered successfully.' });
-  } catch (error) {
-    console.error('Signup error:', error);
+  } catch (err) {
+    console.error('Signup error:', err);
     res.status(500).json({ error: 'Server error during signup.' });
   }
 });
@@ -211,80 +136,205 @@ app.post('/signup', async (req, res) => {
  * @swagger
  * /login:
  *   post:
- *     summary: Login and get JWT token
- *     tags: [Authentication]
+ *     summary: Login user
+ *     tags: [Auth]
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/LoginRequest'
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
  *     responses:
  *       200:
- *         description: Successful login
+ *         description: Login successful
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/AuthResponse'
- *       401:
- *         description: Unauthorized
- *       500:
- *         description: Server error
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 user:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     dateOfBirth:
+ *                       type: string
+ *                     company:
+ *                       type: string
+ *                     gender:
+ *                       type: string
+ *                     profile:
+ *                       type: object
+ *                       nullable: true
  */
 app.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-
     if (!email || !password)
       return res.status(400).json({ error: 'Email and password required.' });
 
     const user = await User.findOne({ email });
-    if (!user)
+    if (!user || !(await bcrypt.compare(password, user.password)))
       return res.status(401).json({ error: 'Invalid credentials.' });
 
-    // For development: compare plain text passwords directly
-    if (user.password !== password)
-      return res.status(401).json({ error: 'Invalid credentials.' });
+    const profile = await UserProfile.findOne({ userId: user._id });
 
-    res.json({ email: user.email, message: 'Login successful' });
-  } catch (error) {
-    console.error('Login error:', error);
+    res.json({
+      message: 'Login successful',
+      user: {
+        id: user._id,
+        email: user.email,
+        dateOfBirth: user.dateOfBirth,
+        company: user.company,
+        gender: user.gender,
+        profile: profile || null
+      }
+    });
+  } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Server error during login.' });
+  }
+});
+
+/**
+ * @swagger
+ * /profile:
+ *   post:
+ *     summary: Create or update user profile
+ *     tags: [Profile]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               userId:
+ *                 type: string
+ *               interests:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               availability:
+ *                 type: object
+ *                 additionalProperties:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *               commutePreferences:
+ *                 type: object
+ *                 properties:
+ *                   direction:
+ *                     type: string
+ *                   days:
+ *                     type: array
+ *                     items:
+ *                       type: string
+ *                   departureTime:
+ *                     type: string
+ *                   commuteMode:
+ *                     type: string
+ *                   flexibleTiming:
+ *                     type: boolean
+ *     responses:
+ *       200:
+ *         description: Profile saved
+ */
+// POST /profile (Create or update profile using email)
+app.post('/profile', async (req, res) => {
+  try {
+    const { email, interests, availability, commutePreferences } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // Find user by email
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Create or update profile for the user
+    const profile = await UserProfile.findOneAndUpdate(
+      { userId: user._id },  // Find by the user's ObjectId
+      { userId: user._id, interests, availability, commutePreferences },
+      { upsert: true, new: true }
+    );
+
+    res.status(200).json({ message: 'Profile saved', profile });
+  } catch (err) {
+    console.error('Profile error:', err);
+    res.status(500).json({ error: 'Failed to save profile' });
+  }
+});
+
+// GET /profile (Retrieve profile using email)
+app.get('/profile', async (req, res) => {
+  try {
+    const { email } = req.query;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // Find user by email
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Find profile by userId
+    const profile = await UserProfile.findOne({ userId: user._id });
+    if (!profile) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+
+    res.json(profile);
+  } catch (err) {
+    console.error('Get profile error:', err);
+    res.status(500).json({ error: 'Failed to fetch profile' });
   }
 });
 
 
 /**
  * @swagger
- * /profile:
+ * /profile/{userId}:
  *   get:
- *     summary: Get user profile (protected)
- *     tags: [User]
- *     security:
- *       - bearerAuth: []
+ *     summary: Get user profile by userId
+ *     tags: [Profile]
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: MongoDB User ID
  *     responses:
  *       200:
- *         description: User profile
+ *         description: Profile object
  *         content:
  *           application/json:
  *             schema:
  *               type: object
- *               properties:
- *                 email:
- *                   type: string
- *                 _id:
- *                   type: string
- *       401:
- *         description: Unauthorized
+ *       404:
+ *         description: Profile not found
  */
-app.get('/profile', (req, res) => {
-  res.json({ _id: req.user._id, email: req.user.email });
-});
+
 
 // =============================================
-// Server Start
+// Start Server
 // =============================================
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
